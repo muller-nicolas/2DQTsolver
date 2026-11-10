@@ -2,15 +2,17 @@
     Architectures
 
 Minimal backend abstraction. This is the ONLY place that knows which array type
-lives on which device. Everything else (Grid, Fields, Spectral, ...) asks the
+lives on which device. Everything else (Grid, Fields, FFT, ...) asks the
 architecture for arrays via `allocate` / `to_device`.
 
-The architecture *types* are defined here, but the methods that need the GPU
-packages (`array_type`, `device_synchronize` for `CUDAGPU` / `MetalGPU`) live in
-the package extensions `ext/CUDAExt.jl` and `ext/MetalExt.jl`. They are only
-loaded when the user does `using CUDA` / `using Metal`.
+No package extensions and no hard dependency on CUDA.jl / Metal.jl: the GPU
+package is looked up *at runtime* among the modules the user has already loaded.
+So it works the same whether GPE2D is included with `include("GPE2D.jl")` or
+installed as a package. The user only has to load the backend first:
 
-The FFT module will build on top of this (plans per architecture).
+    using Metal              # or: using CUDA
+    include("GPE2D.jl"); using .GPE2D
+    grid = Grid(MetalGPU(), Float32; nx = 512, Lx = 64.0)
 """
 module Architectures
 
@@ -24,14 +26,18 @@ struct CPU      <: AbstractArchitecture end
 struct CUDAGPU  <: AbstractArchitecture end
 struct MetalGPU <: AbstractArchitecture end
 
+# ---------------------------------------------------------------- runtime lookup
+function _backend_module(name::String)
+    for (id, mod) in Base.loaded_modules
+        id.name == name && return mod
+    end
+    error("The $name package is not loaded. Run `using $name` before creating the grid.")
+end
+
 # ---------------------------------------------------------------- array types
-# NOTE: the fallback is defined on the abstract type so that the extensions can
-# add more specific methods without overwriting anything (which Julia forbids
-# during precompilation).
-array_type(arch::AbstractArchitecture) =
-    error("No array type available for $(typeof(arch)). " *
-          "Load the backend package first (`using CUDA` or `using Metal`).")
-array_type(::CPU) = Array
+array_type(::CPU)      = Array
+array_type(::CUDAGPU)  = getfield(_backend_module("CUDA"),  :CuArray)
+array_type(::MetalGPU) = getfield(_backend_module("Metal"), :MtlArray)
 
 # ---------------------------------------------------------------- data movement
 """
@@ -59,7 +65,9 @@ to_host(A::AbstractArray) = Array(A)
 
 # ---------------------------------------------------------------- misc
 "Block until all queued device work is finished (no-op on CPU). Needed for timing."
-device_synchronize(::AbstractArchitecture) = nothing
+device_synchronize(::CPU)      = nothing
+device_synchronize(::CUDAGPU)  = getfield(_backend_module("CUDA"),  :synchronize)()
+device_synchronize(::MetalGPU) = getfield(_backend_module("Metal"), :synchronize)()
 
 architecture_name(::CPU)      = "CPU"
 architecture_name(::CUDAGPU)  = "CUDA GPU"

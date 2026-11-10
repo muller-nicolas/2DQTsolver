@@ -1,14 +1,16 @@
 module GPE2D
 
 # Dependency order (each file only uses the ones above it):
-#   Architectures → Grid → Fields → (FFT → Spectral → Models/GPE → TimeSteppers → ...)
+#   Architectures → Grid → Fields → FFT → (Spectral → Models/GPE → TimeSteppers → ...)
 include("Architectures.jl")
 include("Grid.jl")
 include("Fields.jl")
+include("FFT.jl")
 
 using .Architectures
 using .Grids
 using .Fields
+using .FFT
 
 # Re-export the public API
 export AbstractArchitecture, CPU, CUDAGPU, MetalGPU,
@@ -20,5 +22,6 @@ export Layout, RealPhysical, ComplexPhysical, FullSpectral, HalfSpectral,
        field_size, field_eltype, allocate_field, allocate_fields, repeated_layout,
        Clock, advance!, AbstractState, State, Workspace,
        fields, clock, host_fields, memory_bytes, GPE_STATE_LAYOUT, gpe_state
+export FFTPlans, forward!, backward!, to_spectral!, to_physical!
 
 end # module

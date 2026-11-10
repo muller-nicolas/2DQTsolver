@@ -23,6 +23,7 @@ Conventions
 module Grids
 
 using ..Architectures
+using AbstractFFTs: fftfreq, rfftfreq
 
 export Grid, float_type, ncells, cell_area, domain_area, nyquist, half_size,
        xcoords, ycoords, kxcoords, kycoords, wavenumber_squared, dealias_fraction
@@ -98,9 +99,12 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
     x_h = [x0 + (i - 1) * dx for i in 1:nx]
     y_h = [y0 + (j - 1) * dy for j in 1:ny]
 
-    fftk(n, L)  = [2π / L * (j < n ÷ 2 ? j : j - n) for j in 0:n-1]
-    rfftk(n, L) = [2π / L * j for j in 0:n÷2]
-    kx_h, ky_h, kxr_h = fftk(nx, Lx64), fftk(ny, Ly64), rfftk(nx, Lx64)
+    # Wavenumbers come from AbstractFFTs, i.e. from the same library whose plans do
+    # the transforms (see FFT.jl), so the ordering cannot get out of sync with the
+    # data. fs = n/L plays the role of the sampling frequency 1/dx.
+    kx_h  = collect(2π .* fftfreq(nx, nx / Lx64))
+    ky_h  = collect(2π .* fftfreq(ny, ny / Ly64))
+    kxr_h = collect(2π .* rfftfreq(nx, nx / Lx64))
 
     # Dealiasing mask (ellipse/circle or rectangle in k-space)
     frac = dealias_fraction(dealias)
