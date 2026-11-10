@@ -16,7 +16,7 @@ backend == "cuda"  && @eval using CUDA      # the backend must be loaded BEFORE 
 backend == "metal" && @eval using Metal
 
 nx, ny = 2048, 2048
-Lx, Ly = 2π, 2πjk
+Lx, Ly = 2π, 2π
 using GPE2D
 
 arch, T = backend == "cuda"  ? (CUDAGPU(),  Float64) :
