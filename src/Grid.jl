@@ -41,6 +41,8 @@ struct Grid{T<:AbstractFloat, A<:AbstractArchitecture,
     y::K                    # 1  × ny  (device)
     kx::K                   # nx × 1   (device, FFT order)
     ky::K                   # 1  × ny  (device, FFT order)
+    kx1::K                  # nx × 1   like kx but Nyquist mode zeroed: for ODD derivatives
+    ky1::K                  # 1  × ny  like ky but Nyquist mode zeroed: for ODD derivatives
     kx_r::K                 # (nx÷2+1) × 1  (device, rfft order)
     mask::M                 # nx × ny  (device), 1 = keep, 0 = remove
     kcut::NTuple{2,T}       # dealiasing cutoff in (kx, ky)
@@ -106,6 +108,12 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
     ky_h  = collect(2π .* fftfreq(ny, ny / Ly64))
     kxr_h = collect(2π .* rfftfreq(nx, nx / Lx64))
 
+    # For odd derivatives the Nyquist mode (index n/2+1, stored as -n/2) has no
+    # well-defined sign, so its wavenumber is set to zero there.
+    kx1_h, ky1_h = copy(kx_h), copy(ky_h)
+    kx1_h[nx ÷ 2 + 1] = 0
+    ky1_h[ny ÷ 2 + 1] = 0
+
     # Dealiasing mask (ellipse/circle or rectangle in k-space)
     frac = dealias_fraction(dealias)
     kcx, kcy = frac * π / dx, frac * π / dy
@@ -125,7 +133,7 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
     row(v) = to_device(arch, T.(reshape(v, 1, :)))
 
     return Grid(arch, Int(nx), Int(ny), T(Lx64), T(Ly64), T(dx), T(dy),
-                col(x_h), row(y_h), col(kx_h), row(ky_h), col(kxr_h),
+                col(x_h), row(y_h), col(kx_h), row(ky_h), col(kx1_h), row(ky1_h), col(kxr_h),
                 to_device(arch, mask_h), (T(kcx), T(kcy)), frac, shape)
 end
 
