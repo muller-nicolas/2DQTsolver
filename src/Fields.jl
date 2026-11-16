@@ -34,8 +34,7 @@ export Layout, RealPhysical, ComplexPhysical, FullSpectral, HalfSpectral,
        field_size, field_eltype, allocate_field, allocate_fields, repeated_layout,
        Clock, advance!,
        AbstractState, State, Workspace,
-       fields, clock, host_fields, memory_bytes,
-       GPE_STATE_LAYOUT, gpe_state
+       fields, clock, host_fields, memory_bytes
 
 # ---------------------------------------------------------------- layouts
 abstract type Layout end
@@ -161,15 +160,5 @@ function Base.show(io::IO, ::MIME"text/plain", w::Workspace)
     println(io, "Workspace  (", round(memory_bytes(w) / 2^20; digits = 1), " MiB)")
     _show_fields(io, getfield(w, :buffers))
 end
-
-# ---------------------------------------------------------------- GPE convenience
-# These two definitions are GPE-specific and will move to a `Models/GPE.jl` module
-# when we write it; they live here only to make the first tests easy.
-#
-#   ψk : evolved variable (Fourier space)
-#   ψ  : physical-space cache, refreshed from ψk when needed (diagnostics, output,
-#        evaluation of |ψ|²ψ).
-const GPE_STATE_LAYOUT = (ψ = ComplexPhysical(), ψk = FullSpectral())
-gpe_state(g::Grid) = State(g, GPE_STATE_LAYOUT)
 
 end # module

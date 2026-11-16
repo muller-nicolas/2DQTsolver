@@ -5,10 +5,20 @@ authors = ["nmuller "]
 
 [deps]
 AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
+FFMPEG_jll = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
-Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+OpenSSL_jll = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
 AbstractFFTs = "1.5.0"
+FFMPEG_jll = "9.0.2"
 FFTW = "1.10.0"
-Metal = "1.12.0"
+GLMakie = "0.13.17"
+HDF5 = "0.17.4"
+OpenSSL_jll = "3.5.8"
+Printf = "1.11.0"
+Random = "1.11.0"

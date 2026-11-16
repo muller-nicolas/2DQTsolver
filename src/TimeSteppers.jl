@@ -33,7 +33,8 @@ using ..Fields
 using ..Models
 using ..Spectral
 
-export AbstractTimeStepper, RK4, IFRK4, step!, evolve!, set_dt!, timestep
+export AbstractTimeStepper, RK4, IFRK4, step!, evolve!, set_dt!, timestep,
+       every, CallbackSet
 
 abstract type AbstractTimeStepper end
 
@@ -173,16 +174,42 @@ end
 """
     evolve!(state, stepper, model, nsteps; callback = nothing)
 
-Take `nsteps` steps. If given, `callback(state)` is called after every step (use it
-for diagnostics or output, and test `state.clock.iteration` to choose how often).
+Take `nsteps` steps. If given, `callback(state)` is called after every step (use
+`every(n, f)` to call something only every `n` steps, and `CallbackSet` to combine
+several). If the callback returns `:stop`, the run ends early.
 """
 function evolve!(state::AbstractState, s::AbstractTimeStepper, model::AbstractModel,
                  nsteps::Integer; callback = nothing)
     for _ in 1:nsteps
         step!(state, s, model)
-        callback === nothing || callback(state)
+        if callback !== nothing && callback(state) === :stop
+            break
+        end
     end
     return state
+end
+
+# ================================================================== callbacks
+"Callable that runs `f(state)` only when the iteration counter is a multiple of `n`."
+struct Every{F}
+    n::Int
+    f::F
+end
+(e::Every)(state) = (clock(state).iteration % e.n == 0) ? e.f(state) : nothing
+
+"`every(n, f)`: wrap callback `f` so that it runs every `n` steps."
+every(n::Integer, f) = Every(Int(n), f)
+
+"Run several callbacks in order; stops as soon as one of them returns `:stop`."
+struct CallbackSet{T<:Tuple}
+    callbacks::T
+end
+CallbackSet(cbs...) = CallbackSet(cbs)
+function (c::CallbackSet)(state)
+    for cb in c.callbacks
+        cb(state) === :stop && return :stop
+    end
+    return nothing
 end
 
 end # module
