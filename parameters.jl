@@ -27,14 +27,16 @@
     n0 = 1.0,                   # mean density
 
     # ------------------------------------------------------------ case
-    case = "waves",             # "dipole": vortex dipole in a uniform condensate
+    case = "dipole",            # "dipole":   vortex dipole in a uniform condensate
                                 # "obstacle": moving Gaussian obstacle + a little noise
+                                # "noise":    uniform condensate + noise (no obstacle); good for
+                                #             the dispersion relation
 
-    dipole_separation = 8.0,    # [ξ]  distance between the two vortices
+    dipole_separation = 10.0,    # [ξ]  distance between the two vortices
 
-    noise_amplitude = 0.1,     # relative to √n0 (used by case = "obstacle")
-    kicmin = 1,                 # [k]  minimum wavenumber of the initial waves
-    kicmax = 8,                 # [k]  maximum wavenumber of the initial waves
+    noise_amplitude = 0.1,     # relative to √n0 (cases "obstacle" and "noise")
+    kicmin = 1,                 # [kξ]  minimum wavenumber of the noise (in units of ξ⁻¹)
+    kicmax = 4,                 # [kξ]  maximum wavenumber of the noise (in units of ξ⁻¹)
     obstacle = (V0       = 3.0, # [μ]  height
                 sigma    = 1.5, # [ξ]  width
                 velocity = 0.5, # [c]  speed along x
@@ -54,13 +56,21 @@
     # The initial state (iteration 0) and the final state are always written.
     save_fields_every      = 100,   # snapshots of Re ψ and Im ψ
     save_diagnostics_every = 20,    # scalar time series: N (particle number) and E (energy)
-    save_spectra_every     = 0,     # spectral outputs. Reserved: the spectra themselves come
-                                    # with the spectral analysis module; until then a value
-                                    # > 0 only prints a warning and is ignored.
+    save_spectra_every     = 200,   # energy spectra: incompressible and compressible kinetic,
+                                    # quantum pressure and internal (9 FFTs per output, so
+                                    # keep it much larger than the other two)
+
+    # Dispersion relation: save ψ̂(kx, ky=0) and ψ̂(kx=0, ky) as functions of time, to get
+    # ω(k) in post-processing by Fourier transforming in time. Cheap (no extra FFT).
+    # The excitations must be seeded: use case = "noise" (or "obstacle").
+    # The sampling time Δt = save_dispersion_every·dt must satisfy π/Δt > ω_max, and the
+    # frequency resolution is 2π/(nsteps·dt); the script prints both.
+    save_dispersion       = true,   # master switch for this stream
+    save_dispersion_every = 1,      # steps between samples (uniform sampling in time)
 
     # ------------------------------------------------------------ screen output / live view
-    print_every = 10,          # steps between lines with the drift of N and E
-    plot_every  = 10,           # steps between plot updates
+    print_every = 200,          # steps between lines with the drift of N and E
+    plot_every  = 20,           # steps between plot updates
     plot_pause  = 0.0,          # extra seconds to wait after each frame (slows the movie down)
     density_range = (0.0, 1.5), # colour range of |ψ|²/n0
 )

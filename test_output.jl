@@ -116,13 +116,91 @@ end
     @test snapshot_names(path) == String[]                     # fields disabled
     @test read_timeseries(path).iteration == [0, 7, 14]
 
-    # spectra requested but the GPE has no spectra output yet: warning, stream disabled
+    # spectra requested from a spec that provides none: warning, stream disabled
+    base = default_outputs(model)
+    nospec = OutputSpec(; fields = base.fields, scalars = base.scalars, metadata = base.metadata)
     path2 = joinpath(mktempdir(), "nospectra.h5")
     w2 = @test_logs (:warn, r"pectra") match_mode = :any OutputWriter(
-        path2, state, model; fields_every = 5, spectra_every = 5, nsteps = 10)
+        path2, state, model; fields_every = 5, spectra_every = 5, nsteps = 10, outputs = nospec)
     @test w2.spectra_every == 0
     close(w2)
     @test snapshot_names(path2; group = "spectra") == String[]
+end
+
+@testset "Output: GPE energy spectra" begin
+    grid, p, model, state, stepper = make_setup()
+    path = joinpath(mktempdir(), "spectra.h5")
+    w = OutputWriter(path, state, model; spectra_every = 5, nsteps = 10)
+    w(state)
+    evolve!(state, stepper, model, 10; callback = w)
+    N, E = particle_number(state, model), energy(state, model)
+    close(w)
+
+    @test snapshot_names(path; group = "spectra") == ["00000000", "00000005", "00000010"]
+    sp = read_snapshot(path, 3; group = "spectra")
+    @test Set(keys(sp.fields)) == Set([:k, :E_kin_inc, :E_kin_comp, :E_quantum, :E_internal])
+    @test sp.fields.k[1] == 0.0 && sp.fields.k[2] ≈ 1.0       # Lx = 2π → dk = 1
+    @test length(sp.fields.E_internal) == length(sp.fields.k)
+    f = sp.fields
+    total = sum(f.E_kin_inc) + sum(f.E_kin_comp) + sum(f.E_quantum) + sum(f.E_internal)
+    @test total ≈ E + N rtol = (T == Float32 ? 1e-3 : 1e-6)   # the spectra add up to the energy
+end
+
+
+@testset "Output: traces (dispersion), uniform sampling" begin
+    grid, p, model, state, stepper = make_setup()
+    path = joinpath(mktempdir(), "traces.h5")
+    # traces_block = 2 forces several block writes plus a partial one at close
+    w = OutputWriter(path, state, model; traces_every = 2, nsteps = 11, traces_block = 2)
+    w(state)
+    evolve!(state, stepper, model, 11; callback = w)
+    write_final!(w, state)                       # iteration 11: must NOT add a trace sample
+    ψk = Array(state.ψk)                         # state at iteration 11
+    close(w)
+
+    tr = read_traces(path)
+    @test tr.iteration == [0, 2, 4, 6, 8, 10]    # uniform: no extra sample at 11
+    @test tr.t ≈ dt .* [0, 2, 4, 6, 8, 10]
+    @test size(tr.psi_kx_re) == (32, 6) && size(tr.psi_ky_re) == (32, 6)
+    @test all(isfinite, tr.psi_kx_re) && all(isfinite, tr.psi_ky_im)
+
+    d = read_dispersion(path)
+    @test size(d.psi_kx) == (32, 6) && eltype(d.psi_kx) <: Complex
+    @test d.kx[2] ≈ 1.0 && d.ky[2] ≈ 1.0 && d.kx[1] == 0
+    # the k = 0 mode is the mean of ψ: |c_0| ≈ √n0 (the dipole is mostly uniform)
+    @test 0.5 < abs(d.psi_kx[1, 1]) < 1.5
+
+    # a writer with traces disabled has no /traces group
+    path2 = joinpath(mktempdir(), "notraces.h5")
+    w2 = OutputWriter(path2, state, model; diagnostics_every = 5, nsteps = 5)
+    close(w2)
+    @test !h5open(f -> haskey(f, "traces"), path2, "r")
+end
+
+@testset "Output: dispersion traces reproduce the Bogoliubov oscillation" begin
+    # ψ = √n0 (1 + ε cos(m x)):  c_m(t) = (√n0 ε / 2) cos(ω t) + i (...),  ω = Bogoliubov ω(k)
+    grid   = Grid(arch, T; nx = 32, Lx = 2π)
+    p      = GPEParameters(grid; c = 1.0, ξ = 2 * grid.dx)
+    model  = GPE(p, grid, FFTPlans(grid))
+    state  = gpe_state(grid)
+    m, ε   = 2, 1e-3
+    x, y   = xcoords(grid), ycoords(grid)
+    set_wavefunction!(state, model,
+                      Complex{T}.(sqrt(p.n0) .* (1 .+ ε .* cos.(m .* x)) .+ 0 .* y'))
+
+    path = joinpath(mktempdir(), "bogoliubov.h5")
+    w = OutputWriter(path, state, model; traces_every = 10, nsteps = 100)
+    w(state)
+    evolve!(state, IFRK4(grid, model, 0.01), model, 100; callback = w)
+    close(w)
+
+    d  = read_dispersion(path)
+    ω  = bogoliubov_frequency(p, m)                      # Lx = 2π → k = m
+    @test length(d.t) == 11
+    expected = sqrt(p.n0) * ε / 2 .* cos.(ω .* d.t)
+    @test maximum(abs.(real.(d.psi_kx[m + 1, :]) .- expected)) < 5e-6    # ψ̂(kx = +m, ky = 0)
+    @test maximum(abs.(real.(d.psi_kx[end - m + 1, :]) .- expected)) < 5e-6   # ψ̂(kx = -m, ky = 0)
+    @test maximum(abs.(d.psi_ky[m + 1, :])) < 5e-6       # nothing along ky: ripple is along x only
 end
 
 println("\nAll tests finished.")

@@ -1,13 +1,17 @@
 """
     Output
 
-HDF5 output. One file per run, with three independent streams, each with its own
+HDF5 output. One file per run, with four independent streams, each with its own
 frequency (in time steps; `0` disables the stream):
 
 * **fields**       snapshots of the fields (for the GPE: `psi_re`, `psi_im`)
 * **diagnostics**  scalar time series (for the GPE: `N`, `E`)
-* **spectra**      1D/ND arrays computed from the state (hook ready; the GPE spectra
-                   themselves will be added with the spectral analysis module)
+* **spectra**      arrays computed from the state (for the GPE: the energy spectra
+                   `k`, `E_kin_inc`, `E_kin_comp`, `E_quantum`, `E_internal`,
+                   see `SpectralAnalysis`)
+* **traces**       vectors saved at every sample and stored as the columns of 2D
+                   datasets (for the GPE: ψ̂(kx, ky=0) and ψ̂(kx=0, ky), used to get
+                   the dispersion relation ω(k) in post-processing)
 
 The writer itself knows nothing about the equation. What to write is described by an
 `OutputSpec`, and each model provides `default_outputs(model)`.
@@ -15,8 +19,8 @@ The writer itself knows nothing about the equation. What to write is described b
 Use as a callback (it checks by itself which streams are due):
 
     w = OutputWriter("output/run.h5", state, model;
-                     fields_every = 100, diagnostics_every = 20, spectra_every = 0,
-                     nsteps = 3000, metadata = cfg)
+                     fields_every = 100, diagnostics_every = 20, spectra_every = 200,
+                     traces_every = 1, nsteps = 3000, metadata = cfg)
     w(state)                                   # iteration 0
     evolve!(state, stepper, model, 3000; callback = w)
     write_final!(w, state); close(w)
@@ -30,12 +34,21 @@ File layout
     /timeseries      t, iteration, N, E        (preallocated; unwritten entries have
                                                 iteration = -1 and are dropped by `read_timeseries`)
     /spectra/<it>/...                          attrs: t, iteration
+    /traces          t, iteration, psi_kx_re, psi_kx_im, psi_ky_re, psi_ky_im
+                                               (2D: one column per sample, preallocated;
+                                                unwritten columns have iteration = -1)
 
 Orientation: a Julia array `ψ[i, j]` (i along x, j along y) is stored as is. From
 Python (h5py) it appears with shape `(ny, nx)`, i.e. `psi[j, i]`, which is what
-`imshow` expects.
+`imshow` expects. The trace datasets (Julia `(nk, nsamples)`) appear in h5py as
+`(nsamples, nk)`: time first, so `np.fft.fft(psi, axis=0)` is the time transform.
 
-Reading: `snapshot_names`, `read_snapshot`, `read_timeseries`, `read_attributes`.
+Traces are written only at iterations that are multiples of `traces_every` (and at
+iteration 0), never at an extra "final" iteration, so the time sampling is exactly
+uniform. They are buffered in memory and written to disk in blocks (and on `close`).
+
+Reading: `snapshot_names`, `read_snapshot`, `read_timeseries`, `read_traces`,
+`read_dispersion`, `read_attributes`.
 """
 module Output
 
@@ -46,14 +59,16 @@ using ..Fields
 using ..Models
 using ..GrossPitaevskii
 using ..Diagnostics
+using ..SpectralAnalysis
 
 export OutputSpec, OutputWriter, default_outputs,
-       write_fields!, write_diagnostics!, write_spectra!, write_final!,
-       snapshot_names, read_snapshot, read_timeseries, read_attributes
+       write_fields!, write_diagnostics!, write_spectra!, write_traces!, write_final!,
+       snapshot_names, read_snapshot, read_timeseries, read_traces, read_dispersion,
+       read_attributes
 
 # ================================================================== what to write
 """
-    OutputSpec(; fields, scalars, spectra, metadata)
+    OutputSpec(; fields, scalars, spectra, traces, metadata)
 
 Description of the outputs of a model. Each entry is a function of `(state, model)`
 (`metadata` of `model` only), or `nothing` if the model has no such output:
@@ -61,16 +76,18 @@ Description of the outputs of a model. Each entry is a function of `(state, mode
 * `fields(state, model)  -> NamedTuple` of host arrays, e.g. `(psi_re = ..., psi_im = ...)`
 * `scalars(state, model) -> NamedTuple` of numbers,     e.g. `(N = ..., E = ...)`
 * `spectra(state, model) -> NamedTuple` of host arrays, e.g. `(k = ..., Ek = ...)`
+* `traces(state, model)  -> NamedTuple` of host VECTORS of fixed length
 * `metadata(model)       -> NamedTuple` of numbers/strings, stored as attributes
 """
-struct OutputSpec{F, S, P, M}
+struct OutputSpec{F, S, P, TR, M}
     fields::F
     scalars::S
     spectra::P
+    traces::TR
     metadata::M
 end
-OutputSpec(; fields = nothing, scalars = nothing, spectra = nothing,
-           metadata = m -> NamedTuple()) = OutputSpec(fields, scalars, spectra, metadata)
+OutputSpec(; fields = nothing, scalars = nothing, spectra = nothing, traces = nothing,
+           metadata = m -> NamedTuple()) = OutputSpec(fields, scalars, spectra, traces, metadata)
 
 default_outputs(m::AbstractModel) =
     error("no default outputs defined for models of type $(typeof(m)); pass `outputs = OutputSpec(...)`")
@@ -84,8 +101,23 @@ function default_outputs(::GPE)
     scalars = (s, m) -> (N = particle_number(s, m), E = energy(s, m))
     metadata = m -> (c = m.params.c, xi = m.params.ξ, n0 = m.params.n0, mu = m.params.μ,
                      omega0 = m.params.ω0, hbar_over_m = m.params.hbar_over_m, g = m.params.g)
-    # spectra: to be provided by the spectral analysis module
-    return OutputSpec(; fields = fields, scalars = scalars, metadata = metadata)
+    # energy spectra; the analyzer (buffers + shells) is created on first use only
+    analyzer = Ref{Any}(nothing)
+    spectra = (s, m) -> begin
+        analyzer[] === nothing && (analyzer[] = SpectraAnalyzer(m))
+        energy_spectra(analyzer[], s)
+    end
+    # ψ̂ on the two axes of Fourier space, as Fourier coefficients c_k = ψ̂/(nx ny),
+    # i.e. ψ(x) = Σ c_k e^{ik·x}. FFT ordering (index 1 is k = 0).
+    traces = (s, m) -> begin
+        N = ncells(m.grid)
+        cx = Array(s.ψk[:, 1]) ./ N                  # ψ(kx, ky = 0)
+        cy = Array(s.ψk[1, :]) ./ N                  # ψ(kx = 0, ky)
+        (psi_kx_re = real.(cx), psi_kx_im = imag.(cx),
+         psi_ky_re = real.(cy), psi_ky_im = imag.(cy))
+    end
+    return OutputSpec(; fields = fields, scalars = scalars, spectra = spectra,
+                      traces = traces, metadata = metadata)
 end
 
 # ================================================================== attributes helpers
@@ -140,23 +172,35 @@ mutable struct OutputWriter{M, S<:OutputSpec, F}
     last_diagnostics::Int
     last_spectra::Int
     warned_capacity::Bool
+    traces_every::Int
+    traces_block::Int                   # samples buffered in memory before writing
+    traces_capacity::Int                # preallocated number of trace columns
+    ntraces::Int                        # trace samples already in the file
+    trace_series::Dict{Symbol, Any}     # open datasets of /traces
+    pending_t::Vector{Float64}          # buffered, not yet written
+    pending_it::Vector{Int}
+    pending::Vector{Any}
+    last_traces::Int
+    warned_traces::Bool
 end
 
 """
     OutputWriter(path, state, model; fields_every = 0, diagnostics_every = 0,
-                 spectra_every = 0, nsteps, outputs = default_outputs(model),
-                 metadata = NamedTuple())
+                 spectra_every = 0, traces_every = 0, nsteps,
+                 outputs = default_outputs(model), metadata = NamedTuple(),
+                 traces_block = 64)
 
 Create the HDF5 file `path` (overwriting an existing one) and write the grid, the
 configuration and the model parameters. `nsteps` is the planned number of steps; it
-sizes the preallocated time series. `metadata` (e.g. the parameter `NamedTuple`) is
-stored in `/config`.
+sizes the preallocated time series and traces. `metadata` (e.g. the parameter
+`NamedTuple`) is stored in `/config`.
 
-The writer must be closed with `close(writer)`.
+The writer must be closed with `close(writer)` (this also writes buffered traces).
 """
 function OutputWriter(path::AbstractString, state, model::AbstractModel;
                       fields_every::Integer = 0, diagnostics_every::Integer = 0,
-                      spectra_every::Integer = 0, nsteps::Integer,
+                      spectra_every::Integer = 0, traces_every::Integer = 0,
+                      nsteps::Integer, traces_block::Integer = 64,
                       outputs::OutputSpec = default_outputs(model),
                       metadata::NamedTuple = NamedTuple())
     mkpath(dirname(abspath(path)))
@@ -166,8 +210,12 @@ function OutputWriter(path::AbstractString, state, model::AbstractModel;
     fe = (fields_every > 0 && outputs.fields !== nothing) ? Int(fields_every) : 0
     de = (diagnostics_every > 0 && outputs.scalars !== nothing) ? Int(diagnostics_every) : 0
     se = (spectra_every > 0 && outputs.spectra !== nothing) ? Int(spectra_every) : 0
+    te = (traces_every > 0 && outputs.traces !== nothing) ? Int(traces_every) : 0
     if spectra_every > 0 && outputs.spectra === nothing
-        @warn "Spectral output requested (spectra_every = $spectra_every) but this model has no spectra output yet; it is disabled."
+        @warn "Spectral output requested (spectra_every = $spectra_every) but this model has no spectra output; it is disabled."
+    end
+    if traces_every > 0 && outputs.traces === nothing
+        @warn "Trace (dispersion) output requested (traces_every = $traces_every) but this model has no traces output; it is disabled."
     end
 
     file = h5open(path, "w")
@@ -193,17 +241,38 @@ function OutputWriter(path::AbstractString, state, model::AbstractModel;
             series[k] = g[string(k)]
         end
     end
+
+    trace_series = Dict{Symbol, Any}()
+    traces_capacity = 0
+    if te > 0
+        traces_capacity = nsteps ÷ te + 2               # iteration 0 and every `te`
+        g = create_group(file, "traces")
+        g["t"] = fill(NaN, traces_capacity)
+        g["iteration"] = fill(-1, traces_capacity)
+        trace_series[:t] = g["t"]
+        trace_series[:iteration] = g["iteration"]
+        for (k, v) in pairs(outputs.traces(state, model))   # discover names and lengths
+            g[string(k)] = fill(NaN, length(v), traces_capacity)
+            trace_series[k] = g[string(k)]
+        end
+    end
     flush(file)
 
     return OutputWriter(String(path), file, model, outputs, fe, de, se, capacity, 0, series,
-                        -1, -1, -1, false)
+                        -1, -1, -1, false,
+                        te, max(Int(traces_block), 1), traces_capacity, 0, trace_series,
+                        Float64[], Int[], Any[], -1, false)
 end
 
-Base.close(w::OutputWriter) = close(w.file)
+function Base.close(w::OutputWriter)
+    _flush_traces!(w)                   # do not lose the buffered trace samples
+    close(w.file)
+end
 
 function Base.show(io::IO, w::OutputWriter)
     print(io, "OutputWriter(", w.path, "; fields every ", w.fields_every,
-          ", diagnostics every ", w.diagnostics_every, ", spectra every ", w.spectra_every, ")")
+          ", diagnostics every ", w.diagnostics_every, ", spectra every ", w.spectra_every,
+          ", traces every ", w.traces_every, ")")
 end
 
 # ---------------------------------------------------------------- writing
@@ -263,6 +332,44 @@ function write_spectra!(w::OutputWriter, state)
     return nothing
 end
 
+# write the buffered trace samples to the file (one block)
+function _flush_traces!(w::OutputWriter)
+    n = length(w.pending)
+    n == 0 && return nothing
+    i0, i1 = w.ntraces + 1, w.ntraces + n
+    w.trace_series[:t][i0:i1] = w.pending_t
+    w.trace_series[:iteration][i0:i1] = w.pending_it
+    for k in keys(w.pending[1])
+        w.trace_series[k][:, i0:i1] = hcat((Float64.(p[k]) for p in w.pending)...)
+    end
+    w.ntraces = i1
+    empty!(w.pending); empty!(w.pending_t); empty!(w.pending_it)
+    flush(w.file)
+    return nothing
+end
+
+"""
+Take a trace sample (once per iteration). Samples are buffered and written to disk in
+blocks of `traces_block`, and by `write_final!` / `close`.
+"""
+function write_traces!(w::OutputWriter, state)
+    c = clock(state)
+    (w.traces_every == 0 || w.last_traces == c.iteration) && return nothing
+    if w.ntraces + length(w.pending) >= w.traces_capacity
+        if !w.warned_traces
+            @warn "Trace output full ($(w.traces_capacity) samples preallocated from `nsteps`); further samples are not stored."
+            w.warned_traces = true
+        end
+        return nothing
+    end
+    push!(w.pending, w.outputs.traces(state, w.model))
+    push!(w.pending_t, c.t)
+    push!(w.pending_it, c.iteration)
+    w.last_traces = c.iteration
+    length(w.pending) >= w.traces_block && _flush_traces!(w)
+    return nothing
+end
+
 "Callback: write whichever streams are due at the current iteration (iteration 0 counts)."
 function (w::OutputWriter)(state)
     it = clock(state).iteration
@@ -270,14 +377,20 @@ function (w::OutputWriter)(state)
     due(w.fields_every)      && write_fields!(w, state)
     due(w.diagnostics_every) && write_diagnostics!(w, state)
     due(w.spectra_every)     && write_spectra!(w, state)
+    due(w.traces_every)      && write_traces!(w, state)
     return nothing
 end
 
-"Write all active streams now (e.g. the final state), unless already written at this iteration."
+"""
+Write the final state of the fields, diagnostics and spectra now (unless already written
+at this iteration) and flush the buffered traces. No extra trace sample is taken: that
+would break the uniform time sampling needed for the dispersion analysis.
+"""
 function write_final!(w::OutputWriter, state)
     write_fields!(w, state)
     write_diagnostics!(w, state)
     write_spectra!(w, state)
+    _flush_traces!(w)
     return nothing
 end
 
@@ -314,6 +427,47 @@ function read_timeseries(path::AbstractString)
         valid = read(g["iteration"]) .>= 0
         return (; (Symbol(n) => read(g[n])[valid] for n in sort(collect(keys(g))))...)
     end
+end
+
+"""
+Read the traces as a `NamedTuple` (only the samples actually written): `t`, `iteration`
+and the 2D arrays with one COLUMN per sample (Julia shape `(nk, nsamples)`).
+"""
+function read_traces(path::AbstractString)
+    h5open(path, "r") do f
+        g = f["traces"]
+        valid = read(g["iteration"]) .>= 0
+        out = Pair{Symbol, Any}[]
+        for n in sort(collect(keys(g)))
+            d = read(g[n])
+            push!(out, Symbol(n) => (ndims(d) == 1 ? d[valid] : d[:, valid]))
+        end
+        return (; out...)
+    end
+end
+
+"""
+    read_dispersion(path)
+
+The GPE dispersion traces as complex Fourier coefficients (ψ = Σ c_k e^{ik·x}), as a
+`NamedTuple`:
+
+    t, iteration          sample times and iterations (uniformly spaced)
+    kx, ky                wavenumber axes in FFT order (index 1 is k = 0)
+    psi_kx                ψ̂(kx, ky = 0, t), complex matrix of size (nx, nsamples)
+    psi_ky                ψ̂(kx = 0, ky, t), complex matrix of size (ny, nsamples)
+
+For the dispersion relation, Fourier transform along time (dimension 2), e.g.
+`fft(psi_kx, 2)`, and use `fftshift` / `fftfreq` to order k and ω.
+"""
+function read_dispersion(path::AbstractString)
+    tr = read_traces(path)
+    kx, ky = h5open(path, "r") do f
+        read(f["grid/kx"]), read(f["grid/ky"])
+    end
+    return (t = tr.t, iteration = tr.iteration, kx = kx, ky = ky,
+            psi_kx = complex.(tr.psi_kx_re, tr.psi_kx_im),
+            psi_ky = complex.(tr.psi_ky_re, tr.psi_ky_im))
 end
 
 "Read the attributes of a group (`\"config\"`, `\"parameters\"`, `\"grid\"`) as a `Dict`."

@@ -37,7 +37,8 @@ _wrap(d, L) = d - L * round(d / L)
 
 # Padé approximant of the vortex density profile, in units of √2 ξ  (Berloff 2004)
 function _core_amplitude(rB2)
-    a1, a2, b1, b2 = 0.3437, 0.0286, 0.3333, 0.0286
+    a1, a2, b1 = 11/32, 11/384, 1/3
+    b2 = a2
     return sqrt(rB2 * (a1 + a2 * rB2) / (1 + b1 * rB2 + b2 * rB2^2))
 end
 

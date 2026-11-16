@@ -41,14 +41,14 @@ potential = cfg.case == "obstacle" ?
 model = GPE(params, grid, plans; potential = potential)
 state = gpe_state(grid)
 
-ψ0 = if cfg.case == "obstacle"
+ψ0 = if cfg.case == "obstacle" || cfg.case == "noise"
     add_noise!(uniform_density(grid, params), params; amplitude = cfg.noise_amplitude)
 elseif cfg.case == "dipole"
     vortex_dipole(grid, params; separation = cfg.dipole_separation * params.ξ)
 elseif cfg.case == "waves"
     waves!(state, model, cfg)
 else
-    error("unknown case \"$(cfg.case)\" (use \"dipole\" or \"obstacle\")")
+    error("unknown case \"$(cfg.case)\" (use \"dipole\", \"obstacle\" or \"noise\")")
 end
 set_wavefunction!(state, model, ψ0)
 
@@ -63,6 +63,16 @@ println(model)
 # ------------------------------------------------------------------ callbacks
 callbacks = Any[every(cfg.print_every, ConservationLogger(state, model))]
 
+# Dispersion output: check that the time sampling resolves the Bogoliubov frequencies
+if cfg.save_output && cfg.save_dispersion
+    dt_out = cfg.save_dispersion_every * cfg.dt
+    ω_nyq  = π / dt_out
+    ω_max  = bogoliubov_frequency(params, minimum(grid.kcut))
+    @printf("dispersion output: Δt = %.4g, ω_Nyquist = %.4g, Δω = %.3g, ω_Bogoliubov(kmax) = %.4g\n",
+            dt_out, ω_nyq, 2π / (cfg.nsteps * cfg.dt), ω_max)
+    ω_max > ω_nyq && @warn "The dispersion output is undersampled in time: decrease save_dispersion_every (or dt)."
+end
+
 writer = nothing
 if cfg.save_output
     output_path = joinpath(cfg.output_dir, cfg.output_name * ".h5")
@@ -70,6 +80,7 @@ if cfg.save_output
                           fields_every      = cfg.save_fields_every,
                           diagnostics_every = cfg.save_diagnostics_every,
                           spectra_every     = cfg.save_spectra_every,
+                          traces_every      = cfg.save_dispersion ? cfg.save_dispersion_every : 0,
                           nsteps = cfg.nsteps, metadata = cfg)
     writer(state)                               # iteration 0
     push!(callbacks, writer)

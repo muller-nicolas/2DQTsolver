@@ -39,7 +39,8 @@ using ..Spectral
 using ..Potentials
 import ..Models: linear_rate, nonlinear!, evolved_field
 
-export GPEParameters, GPE, GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!
+export GPEParameters, GPE, GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!,
+       bogoliubov_frequency
 
 # ================================================================== parameters
 """
@@ -75,6 +76,14 @@ function Base.show(io::IO, p::GPEParameters{T}) where {T}
     print(io, "GPEParameters{$T}: c = ", p.c, ", ξ = ", p.ξ, ", n0 = ", p.n0,
           "  (μ = ", p.μ, ", ω0 = ", p.ω0, ", ξ/c = ", p.ξ / p.c, ")")
 end
+
+"""
+    bogoliubov_frequency(params, k)
+
+Bogoliubov dispersion relation of the uniform condensate,
+`ω(k) = ω0 √(ξ²k² (ξ²k² + 2))`, which tends to `c k` for `ξk ≪ 1`.
+"""
+bogoliubov_frequency(p::GPEParameters, k::Real) = p.ω0 * sqrt((p.ξ * k)^2 * ((p.ξ * k)^2 + 2))
 
 # ================================================================== state
 #   ψk : evolved variable (Fourier space)

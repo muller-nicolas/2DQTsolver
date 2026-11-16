@@ -27,6 +27,7 @@ using ..Architectures
 using ..Grids
 
 export LaplacianRate, dealias!, ddx!, ddy!, gradient!, laplacian!, inverse_laplacian!,
+       compressible_part!, incompressible_part!,
        apply_rate!, integrating_factor
 
 # ---------------------------------------------------------------- linear rates
@@ -86,6 +87,36 @@ function inverse_laplacian!(out, Ak, grid::Grid)
     z = zero(eltype(out))
     @. out = ifelse(kx^2 + ky^2 == 0, z, -Ak / (kx^2 + ky^2))
     return out
+end
+
+# ---------------------------------------------------------------- Helmholtz decomposition
+"""
+    compressible_part!(cx, cy, wx, wy, grid)
+
+Helmholtz decomposition of a 2D vector field `w = (wx, wy)` given in Fourier space:
+the compressible (irrotational) part is the projection on the wavevector,
+`wc = k (k·w) / k²`. The k = 0 mode is assigned to the incompressible part (`wc = 0`).
+The outputs `cx, cy` must NOT alias the inputs `wx, wy`.
+"""
+function compressible_part!(cx, cy, wx, wy, grid::Grid)
+    kx, ky = grid.kx, grid.ky
+    z = zero(eltype(cx))
+    @. cx = ifelse(kx^2 + ky^2 == 0, z, kx * (kx * wx + ky * wy) / (kx^2 + ky^2))
+    @. cy = ifelse(kx^2 + ky^2 == 0, z, ky * (kx * wx + ky * wy) / (kx^2 + ky^2))
+    return cx, cy
+end
+
+"""
+    incompressible_part!(ix, iy, wx, wy, grid)
+
+Incompressible (solenoidal) part `wi = w − wc` of the vector field `w`, in Fourier
+space. The outputs `ix, iy` must NOT alias the inputs `wx, wy`.
+"""
+function incompressible_part!(ix, iy, wx, wy, grid::Grid)
+    compressible_part!(ix, iy, wx, wy, grid)
+    @. ix = wx - ix
+    @. iy = wy - iy
+    return ix, iy
 end
 
 # ---------------------------------------------------------------- generic linear operators
