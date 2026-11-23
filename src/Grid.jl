@@ -108,7 +108,7 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
     kx_h  = collect(2π .* fftfreq(nx, nx / Lx64))
     ky_h  = collect(2π .* fftfreq(ny, ny / Ly64))
     kxr_h = collect(2π .* rfftfreq(nx, nx / Lx64))
-    k2_h = kx_h.^2 .+ ky_h'.^2  
+    k2_h = T.(kx_h.^2 .+ ky_h'.^2)
 
     # For odd derivatives the Nyquist mode (index n/2+1, stored as -n/2) has no
     # well-defined sign, so its wavenumber is set to zero there.
@@ -117,7 +117,7 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
     ky1_h[ny ÷ 2 + 1] = 0
 
     # Dealiasing mask (ellipse/circle or rectangle in k-space)
-    frac = dealias_fraction(dealias)
+    frac = T(dealias_fraction(dealias))
     kcx, kcy = frac * π / dx, frac * π / dy
     tol = 1 + 1e-9                         # keep modes sitting exactly on the cutoff
     if dealias === :none
@@ -133,7 +133,6 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
 
     col(v) = to_device(arch, T.(reshape(v, :, 1)))
     row(v) = to_device(arch, T.(reshape(v, 1, :)))
-    # k2_h = col(kx_h).^2 .+ row(ky_h).^2  
 
     return Grid(arch, Int(nx), Int(ny), T(Lx64), T(Ly64), T(dx), T(dy),
                 col(x_h), row(y_h), col(kx_h), row(ky_h), col(kx1_h), row(ky1_h), col(kxr_h),

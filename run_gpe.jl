@@ -120,7 +120,7 @@ end
 step!(state, stepper, model)                    # warm-up (compilation) step
 t_wall = @elapsed begin
     evolve!(state, stepper, model, cfg.nsteps - 1; callback = CallbackSet(callbacks...))
-    device_synchronize(arch)
+    GPE2D.device_synchronize(arch)
 end
 @printf("done: %d steps in %.2f s  (%.2f ms/step)\n", state.clock.iteration, t_wall,
         1e3 * t_wall / max(state.clock.iteration - 1, 1))

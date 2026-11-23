@@ -12,12 +12,12 @@
 
 (
     # ------------------------------------------------------------ backend
-    backend = "cpu",            # "cpu" | "cuda" | "metal"   (metal runs in Float32)
-    live    = true,             # show density and phase on the fly (needs GLMakie)
+    backend = "metal",            # "cpu" | "cuda" | "metal"   (metal runs in Float32)
+    live    = false,             # show density and phase on the fly (needs GLMakie)
 
     # ------------------------------------------------------------ grid
-    nx = 128,                   # even; powers of two are best for FFTs
-    ny = 128,
+    nx = 256,                   # even; powers of two are best for FFTs
+    ny = 256,
     Lx = 2π,
     Ly = 2π,
 
@@ -47,7 +47,7 @@
 
     # ------------------------------------------------------------ time stepping
     dt     = 0.01,              # time step (IFRK4)
-    nsteps = 100000,
+    nsteps = 10000,
 
     # ------------------------------------------------------------ imaginary-time relaxation (RGLE)
     # Optionally relax the initial state in imaginary time (real Ginzburg-Landau equation)
