@@ -12,7 +12,7 @@
 
 (
     # ------------------------------------------------------------ backend
-    backend = "metal",            # "cpu" | "cuda" | "metal"   (metal runs in Float32)
+    backend = "cpu",            # "cpu" | "cuda" | "metal"   (metal runs in Float32)
     live    = true,             # show density and phase on the fly (needs GLMakie)
 
     # ------------------------------------------------------------ grid
