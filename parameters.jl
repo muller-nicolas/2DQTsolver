@@ -12,40 +12,42 @@
 
 (
     # ------------------------------------------------------------ backend
-    backend = "cpu",            # "cpu" | "cuda" | "metal"   (metal runs in Float32)
+    backend = "metal",            # "cpu" | "cuda" | "metal"   (metal runs in Float32)
     live    = true,             # show density and phase on the fly (needs GLMakie)
 
     # ------------------------------------------------------------ grid
-    nx = 128,                   # even; powers of two are best for FFTs
-    ny = 128,
+    nx = 256,                   # even; powers of two are best for FFTs
+    ny = 256,
     Lx = 2π,
     Ly = 2π,
 
     # ------------------------------------------------------------ physics
     c  = 1.0,                   # speed of sound
-    xi_over_dx = 2.0,           # healing length ξ = xi_over_dx · dx
+    xi_over_dx = 1.5,           # healing length ξ = xi_over_dx · dx
     n0 = 1.0,                   # mean density
 
     # ------------------------------------------------------------ case
-    case = "dipole",            # "dipole":   vortex dipole in a uniform condensate
+    case = "random",            # "dipole":   vortex dipole in a uniform condensate
                                 # "obstacle": moving Gaussian obstacle + a little noise
-                                # "noise":    uniform condensate + noise (no obstacle); good for
-                                #             the dispersion relation
+                                # "waves":    uniform condensate + waves; good for the dispersion relation
+                                # "random":   Random array of quantum vortices
 
     dipole_separation = 10.0,    # [ξ]  distance between the two vortices
+    nvortices = 50,               # number of vortices (case "random")
+    seed = 1234,                  # random seed (case "random")
 
-    noise_amplitude = 0.1,     # relative to √n0 (cases "obstacle" and "noise")
+    noise_amplitude = 0.0,     # relative to √n0 (cases "obstacle" and "noise")
     kicmin = 1,                 # [kξ]  minimum wavenumber of the noise (in units of ξ⁻¹)
     kicmax = 4,                 # [kξ]  maximum wavenumber of the noise (in units of ξ⁻¹)
-    obstacle = (V0       = 3.0, # [μ]  height
-                sigma    = 1.5, # [ξ]  width
-                velocity = 0.5, # [c]  speed along x
+    obstacle = (V0       = 10.0, # [μ]  height
+                sigma    = 2, # [ξ]  width
+                velocity = 0.4, # [c]  speed along x
                 x0       = -0.25, # initial position, as a fraction of Lx from the box centre
                 y0       = 0.0),  # initial position, as a fraction of Ly from the box centre
 
     # ------------------------------------------------------------ time stepping
     dt     = 0.01,              # time step (IFRK4)
-    nsteps = 3000,
+    nsteps = 10000,
 
     # ------------------------------------------------------------ HDF5 output
     save_output = true,         # master switch
@@ -65,12 +67,12 @@
     # The excitations must be seeded: use case = "noise" (or "obstacle").
     # The sampling time Δt = save_dispersion_every·dt must satisfy π/Δt > ω_max, and the
     # frequency resolution is 2π/(nsteps·dt); the script prints both.
-    save_dispersion       = true,   # master switch for this stream
-    save_dispersion_every = 1,      # steps between samples (uniform sampling in time)
+    save_dispersion       = false,   # master switch for this stream
+    save_dispersion_every = 10,      # steps between samples (uniform sampling in time)
 
     # ------------------------------------------------------------ screen output / live view
     print_every = 200,          # steps between lines with the drift of N and E
-    plot_every  = 20,           # steps between plot updates
+    plot_every  = 10,           # steps between plot updates
     plot_pause  = 0.0,          # extra seconds to wait after each frame (slows the movie down)
-    density_range = (0.0, 1.5), # colour range of |ψ|²/n0
+    density_range = (0.0, 1.05), # colour range of |ψ|²/n0
 )

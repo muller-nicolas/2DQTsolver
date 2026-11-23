@@ -47,7 +47,7 @@ struct Grid{T<:AbstractFloat, A<:AbstractArchitecture,
     mask::M                 # nx × ny  (device), 1 = keep, 0 = remove
     k2  ::M                 # nx × ny  (device, FFT order)
     kcut::NTuple{2,T}       # dealiasing cutoff in (kx, ky)
-    dealias_frac::Float64   # cutoff as a fraction of the Nyquist wavenumber
+    dealias_frac::T   # cutoff as a fraction of the Nyquist wavenumber
     mask_shape::Symbol      # :circular | :square | :none
 end
 
@@ -68,7 +68,7 @@ function dealias_fraction(s::Symbol)
 end
 function dealias_fraction(f::Real)
     0 < f <= 1 || throw(ArgumentError("dealias fraction must be in (0, 1], got $f"))
-    return Float64(f)
+    return T(f)
 end
 
 """
@@ -95,7 +95,7 @@ function Grid(arch::AbstractArchitecture = CPU(), ::Type{T} = Float64;
     mask_shape in (:circular, :square) || throw(ArgumentError("mask_shape must be :circular or :square"))
 
     # Everything is first built on the host in Float64, then converted to T.
-    Lx64, Ly64 = Float64(Lx), Float64(Ly)
+    Lx64, Ly64 = T(Lx), T(Ly)
     dx, dy = Lx64 / nx, Ly64 / ny
     x0 = origin === :center ? -Lx64 / 2 : 0.0
     y0 = origin === :center ? -Ly64 / 2 : 0.0

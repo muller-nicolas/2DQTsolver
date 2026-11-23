@@ -25,10 +25,12 @@ using ..GrossPitaevskii
 export particle_number, energy, ConservationLogger
 
 function particle_number(state, m::GPE)
-    ψk = evolved_field(m, state)
-    g = m.grid
     # Parseval: Σ|ψ|² = Σ|ψk|² / (nx ny)
+    g = m.grid
+    ψk = evolved_field(m, state)
     return Float64(sum(abs2, ψk)) * Float64(cell_area(g)) / ncells(g)
+    # ψ = state.ψ
+    # return Float64(sum(abs2, ψ)) * Float64(cell_area(g))
 end
 
 function energy(state, m::GPE)
@@ -40,10 +42,18 @@ function energy(state, m::GPE)
     kx, ky, n0 = g.kx, g.ky, p.n0
 
     kinetic = Float64(sum(@. (kx^2 + ky^2) * abs2(ψk))) * dA / N      # ∫|∇ψ|²
-    local_  = Float64(sum(x -> abs2(x)^2 / (2n0) - abs2(x), ψ)) * dA  # ∫(|ψ|⁴/2n0 - |ψ|²)
+    # local_  = Float64(sum(x -> abs2(x)^2 / (2n0) - abs2(x), ψ)) * dA  # ∫(|ψ|⁴/2n0 - |ψ|²)
+    local_  = Float64(sum(x -> (abs2(x)-n0)^2 / (2n0) - (abs2(x)-n0), ψ)) * dA  # ∫(|ψ|⁴/2n0 - |ψ|²)
+    # local_  = Float64(sum(x -> (abs2(x)^2 - n0) / (2n0), ψ)) * dA  # ∫(|ψ|⁴/2n0)
     V = m.V
     pot = V === nothing ? 0.0 : Float64(sum(@. abs2(ψ) * V)) * dA     # ∫V|ψ|²
-    return Float64(p.ξ)^2 * kinetic + local_ + pot
+
+    Ekin = Float64(p.ξ)^2 * kinetic
+    Eint = local_
+    Epot = pot
+    H = Ekin + Eint + Epot
+    # return H, Ekin, Eint, Epot
+    return H
 end
 
 """
@@ -56,6 +66,9 @@ mutable struct ConservationLogger{M, IOT<:IO}
     model::M
     N0::Float64
     E0::Float64
+    # Ekin::Float64
+    # Eint::Float64
+    # Epot::Float64
     io::IOT
 end
 
@@ -65,10 +78,11 @@ end
 
 function (l::ConservationLogger)(state)
     N = particle_number(state, l.model)
+    # E, Ekin, Eint, Epot = energy(state, l.model)
     E = energy(state, l.model)
     c = clock(state)
     @printf(l.io, "t = %9.3f   iter = %7d   ΔN/N0 = %+.2e   ΔE/|E0| = %+.2e\n",
-            c.t, c.iteration, (N - l.N0) / l.N0, (E - l.E0) / abs(l.E0))
+            c.t, c.iteration, (N - l.N0) / l.N0, (E - l.E0) / abs(l.E0)) #, Ekin, Eint, Epot
     return nothing
 end
 

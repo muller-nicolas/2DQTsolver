@@ -4,12 +4,12 @@ import h5py
 
 vmin = 0
 vmax = 1.2
-filename = "../output/run.h5"
+filename = "../output/run.h5" # "
 
 fig, ax = plt.subplots(figsize=(8, 6), tight_layout=True)
 with h5py.File(filename, "r") as f:
     times = list(f["snapshots"].keys())
-    t = times[-1]
+    t = times[0]
     psir = f[f"snapshots/{t}/psi_re"][:,:]
     psii = f[f"snapshots/{t}/psi_im"][:,:]
     D = psir**2 + psii**2

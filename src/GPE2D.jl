@@ -53,7 +53,7 @@ export AbstractTimeStepper, RK4, IFRK4, step!, evolve!, set_dt!, timestep,
        every, CallbackSet
 export GPEParameters, GPE, GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!,
        bogoliubov_frequency
-export uniform_density, vortices, vortex_dipole, add_noise!, waves!
+export uniform_density, vortices, vortex_dipole, add_noise!, waves!, vortex_quadrupole, vortex_random
 export particle_number, energy, ConservationLogger
 export ShellBins, shell_sum, SpectraAnalyzer, energy_spectra
 export OutputSpec, OutputWriter, default_outputs,

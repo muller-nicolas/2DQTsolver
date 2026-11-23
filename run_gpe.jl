@@ -45,6 +45,10 @@ state = gpe_state(grid)
     add_noise!(uniform_density(grid, params), params; amplitude = cfg.noise_amplitude)
 elseif cfg.case == "dipole"
     vortex_dipole(grid, params; separation = cfg.dipole_separation * params.ξ)
+elseif cfg.case == "quadrupole"
+    vortex_quadrupole(grid, params; separation = cfg.dipole_separation * params.ξ)
+elseif cfg.case == "random"
+    vortex_random(grid, params; nvortices = cfg.nvortices, seed = cfg.seed)
 elseif cfg.case == "waves"
     waves!(state, model, cfg)
 else

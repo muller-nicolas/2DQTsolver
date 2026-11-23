@@ -98,6 +98,7 @@ function default_outputs(::GPE)
         ψ = Array(s.ψ)
         (psi_re = real.(ψ), psi_im = imag.(ψ))
     end
+    # scalars = (s, m) -> (N = particle_number(s, m), E,Ek,Eint,Epot = energy(s, m))
     scalars = (s, m) -> (N = particle_number(s, m), E = energy(s, m))
     metadata = m -> (c = m.params.c, xi = m.params.ξ, n0 = m.params.n0, mu = m.params.μ,
                      omega0 = m.params.ω0, hbar_over_m = m.params.hbar_over_m, g = m.params.g)

@@ -17,7 +17,8 @@ with h5py.File(filename, "r") as f:
     # im = ax.imshow(D, origin="lower", vmin=vmin, vmax=vmax, animated=True) #, extent=[-10,10,-10,10])
     im = ax.imshow(D, origin="lower", vmin=vmin, vmax=vmax) #, extent=[-10,10,-10,10])
 
-title = ax.set_title(f"t = {t}")
+# title = ax.set_title(f"t = {t}")
+title = ax.set_title(f"t = {float(t)}")
 fig.colorbar(im, ax=ax, label=r"|ψ|²")
 ax.set_xlabel("x")
 ax.set_ylabel("y")
@@ -30,7 +31,8 @@ def animate(i):
         psir = f[f"snapshots/{t}/psi_re"][:,:]
         psii = f[f"snapshots/{t}/psi_im"][:,:]
         D = psir**2 + psii**2
-        title.set_text(f"t = {t}")
+        # title.set_text(f"t = {t}")
+        title.set_text(f"t = {float(t)}")
     im.set_data(D)
     # im.set_array(D)
 
