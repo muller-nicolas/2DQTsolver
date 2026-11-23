@@ -57,6 +57,24 @@ else
 end
 set_wavefunction!(state, model, ψ0)
 
+# ------------------------------------------------------------------ imaginary-time relaxation (RGLE)
+if cfg.relax
+    # the obstacle, if any, is static (at its initial position) during the relaxation
+    relax_potential = cfg.case == "obstacle" ?
+        GaussianObstacle(obs.V0, obs.sigma * params.ξ; x0 = obs.x0 * grid.Lx, y0 = obs.y0 * grid.Ly) :
+        NoPotential()
+    rgle = RGLE(params, grid, plans; potential = relax_potential)
+    normalization = cfg.relax_normalization == "fixed_number" ? FixedNumber(state, rgle) :
+                    cfg.relax_normalization == "fixed_mu"     ? FixedMu() :
+                    error("relax_normalization must be \"fixed_mu\" or \"fixed_number\"")
+    println("\nImaginary-time relaxation of the initial state:")
+    relaxation = relax!(state, rgle; dt = cfg.relax_dt, max_time = cfg.relax_max_time,
+                        tol = cfg.relax_tol, normalization = normalization,
+                        check_every = cfg.relax_check_every)
+    @printf("relaxation finished: converged = %s, τ = %.3f, residual = %.2e\n",
+            relaxation.converged, relaxation.τ, relaxation.residual)
+end
+
 stepper = IFRK4(grid, model, cfg.dt)
 
 println()

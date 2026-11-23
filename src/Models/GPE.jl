@@ -19,11 +19,22 @@ Splitting for the time steppers (see `Models.jl`):
 The uniform state ψ = √n0 is stationary. Derived units: length ξ, velocity c, time
 ξ/c, density n0, energy μ = c² (m = 1), ħ/m = √2 c ξ.
 
+Dynamics
+--------
+The same operator H = -ξ²∇² + |ψ|²/n0 - 1 + V drives two evolutions, selected by the
+`dynamics` of the model:
+
+* `RealTime()`       ∂ₜψ = -iω0 H ψ   (GPE, γ = -iω0)
+* `ImaginaryTime()`  ∂τψ = -ω0 H ψ    (real Ginzburg–Landau equation, RGLE, γ = -ω0)
+
+`RGLE(params, grid, plans; potential)` is the GPE model with `ImaginaryTime()`. The
+RGLE is a gradient flow: it decreases `Diagnostics.energy` (= Ω/μ, with Ω = E - μN)
+until a stationary state of the GPE is reached. See `Relaxation` for the driver.
+
 Extension points kept in mind (not implemented yet)
 ---------------------------------------------------
-* imaginary time:   change the prefactor γ (and λ) from `-iω0` to `-ω0`, plus a
-                    renormalisation hook after each step;
-* advection:        a constant velocity `v` adds `-i v·k` to `linear_rate`;
+* advection:        a constant velocity `v` adds a term `∝ v·k` to `linear_rate`
+                    (advective RGLE: a new dynamics carrying `v`);
 * dipolar / other nonlocal interactions: extra term in `nonlinear!` built from a
                     spectral kernel applied to F[|ψ|²];
 * stochastic terms: added by a dedicated stochastic stepper.
@@ -39,7 +50,8 @@ using ..Spectral
 using ..Potentials
 import ..Models: linear_rate, nonlinear!, evolved_field
 
-export GPEParameters, GPE, GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!,
+export GPEParameters, GPE, RGLE, AbstractDynamics, RealTime, ImaginaryTime,
+       GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!,
        bogoliubov_frequency
 
 # ================================================================== parameters
@@ -94,14 +106,33 @@ const GPE_STATE_LAYOUT = (ψ = ComplexPhysical(), ψk = FullSpectral())
 "Allocate a state with the fields of the GPE (`ψ`, `ψk`)."
 gpe_state(g::Grid) = State(g, GPE_STATE_LAYOUT)
 
+# ================================================================== dynamics
+abstract type AbstractDynamics end
+
+"Real-time dynamics: the Gross–Pitaevskii equation, `∂ₜψ = -iω0 H ψ`."
+struct RealTime <: AbstractDynamics end
+
+"Imaginary-time dynamics: the real Ginzburg–Landau equation, `∂τψ = -ω0 H ψ`."
+struct ImaginaryTime <: AbstractDynamics end
+
+# prefactor γ of the nonlinear term (the linear part is  λ(k) = γ ξ² k²)
+_prefactor(::RealTime, ω0::T) where {T}      = Complex{T}(0, -ω0)
+_prefactor(::ImaginaryTime, ω0::T) where {T} = Complex{T}(-ω0, 0)
+_name(::RealTime)      = "GPE"
+_name(::ImaginaryTime) = "RGLE"
+
 # ================================================================== model
 """
-    GPE(params, grid, plans; potential = NoPotential())
+    GPE(params, grid, plans; potential = NoPotential(), dynamics = RealTime())
+    RGLE(params, grid, plans; potential = NoPotential())
 
-The GPE model. It owns one physical-space buffer (`ψ`), the FFT plans and the external
-potential (and its array `V`, `nothing` if there is no potential).
+The GPE model (real time) and the RGLE (imaginary time, `RGLE(...)` is
+`GPE(...; dynamics = ImaginaryTime())`). It owns one physical-space buffer (`ψ`),
+the FFT plans and the external potential (and its array `V`, `nothing` if there is
+no potential).
 """
-struct GPE{P<:GPEParameters, G<:Grid, F<:FFTPlans, Pot<:AbstractPotential, VT, C<:AbstractMatrix, Γ<:Complex} <: AbstractModel
+struct GPE{P<:GPEParameters, G<:Grid, F<:FFTPlans, Pot<:AbstractPotential, VT,
+           C<:AbstractMatrix, Γ<:Complex, D<:AbstractDynamics} <: AbstractModel
     params::P
     grid::G
     plans::F
@@ -109,27 +140,30 @@ struct GPE{P<:GPEParameters, G<:Grid, F<:FFTPlans, Pot<:AbstractPotential, VT, C
     V::VT
     ψ::C
     γ::Γ
+    dynamics::D
 end
 
 function GPE(params::GPEParameters{T}, grid::Grid{T}, plans::FFTPlans;
-             potential::AbstractPotential = NoPotential()) where {T}
+             potential::AbstractPotential = NoPotential(),
+             dynamics::AbstractDynamics = RealTime()) where {T}
     V = allocate_potential(grid, potential)
     ψ = allocate_field(grid, ComplexPhysical())
-    γ = Complex{T}(0, -params.ω0)
-    return GPE(params, grid, plans, potential, V, ψ, γ)
+    return GPE(params, grid, plans, potential, V, ψ, _prefactor(dynamics, params.ω0), dynamics)
 end
 
+RGLE(params::GPEParameters, grid::Grid, plans::FFTPlans; potential::AbstractPotential = NoPotential()) =
+    GPE(params, grid, plans; potential = potential, dynamics = ImaginaryTime())
+
 function Base.show(io::IO, m::GPE)
-    print(io, "GPE model\n  ", m.params, "\n  ", m.grid, "\n  potential: ", typeof(m.potential))
+    print(io, _name(m.dynamics), " model\n  ", m.params, "\n  ", m.grid,
+          "\n  potential: ", typeof(m.potential))
 end
 
 # ---------------------------------------------------------------- interface
 evolved_field(::GPE, state) = state.ψk
 
-function linear_rate(m::GPE{P}) where {T, P<:GPEParameters{T}}
-    # λ = -i ω0 ξ² k²  =  -coef·k²  with  coef = i ω0 ξ²
-    return LaplacianRate(Complex{T}(0, m.params.ω0 * m.params.ξ^2))
-end
+# λ(k) = γ ξ² k² = -coef·k²  with  coef = -γ ξ²   (GPE: i ω0 ξ²;  RGLE: ω0 ξ², decaying)
+linear_rate(m::GPE) = LaplacianRate(-m.γ * m.params.ξ^2)
 
 # ψ ← γ (|ψ|²/n0 - 1 [+ V]) ψ    (fused, in place)
 function _local_term!(ψ, γ, invn0, ::Nothing)

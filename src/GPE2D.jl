@@ -3,8 +3,8 @@ module GPE2D
 # Dependency order (each file only uses the ones above it):
 #   Architectures → Grid → Fields → FFT → Models (interface) → Spectral → Potentials
 #   → TimeSteppers
-#   → Models/GPE → InitialConditions → Diagnostics → SpectralAnalysis → Output
-#   (next: spectral analysis, imaginary time, ...)
+#   → Models/GPE → InitialConditions → Diagnostics → Relaxation → SpectralAnalysis → Output
+#   (next: checkpoint/restart, advection, ...)
 include("Architectures.jl")
 include("Grid.jl")
 include("Fields.jl")
@@ -16,6 +16,7 @@ include("TimeSteppers.jl")
 include("Models/GPE.jl")
 include("InitialConditions.jl")
 include("Diagnostics.jl")
+include("Relaxation.jl")
 include("SpectralAnalysis.jl")
 include("Output.jl")
 
@@ -30,6 +31,7 @@ using .TimeSteppers
 using .GrossPitaevskii
 using .InitialConditions
 using .Diagnostics
+using .Relaxation
 using .SpectralAnalysis
 using .Output
 
@@ -51,10 +53,12 @@ export AbstractPotential, NoPotential, StaticPotential, GaussianObstacle,
        is_static, allocate_potential, evaluate!, refresh!
 export AbstractTimeStepper, RK4, IFRK4, step!, evolve!, set_dt!, timestep,
        every, CallbackSet
-export GPEParameters, GPE, GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!,
+export GPEParameters, GPE, RGLE, AbstractDynamics, RealTime, ImaginaryTime,
+       GPE_STATE_LAYOUT, gpe_state, update_physical!, set_wavefunction!,
        bogoliubov_frequency
 export uniform_density, vortices, vortex_dipole, add_noise!, waves!, vortex_quadrupole, vortex_random
-export particle_number, energy, ConservationLogger
+export particle_number, energy, chemical_potential, ConservationLogger
+export Normalization, FixedMu, FixedNumber, Renormalizer, relax!, relaxation_residual
 export ShellBins, shell_sum, SpectraAnalyzer, energy_spectra
 export OutputSpec, OutputWriter, default_outputs,
        write_fields!, write_diagnostics!, write_spectra!, write_traces!, write_final!,

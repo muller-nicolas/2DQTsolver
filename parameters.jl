@@ -16,14 +16,14 @@
     live    = true,             # show density and phase on the fly (needs GLMakie)
 
     # ------------------------------------------------------------ grid
-    nx = 256,                   # even; powers of two are best for FFTs
-    ny = 256,
+    nx = 128,                   # even; powers of two are best for FFTs
+    ny = 128,
     Lx = 2π,
     Ly = 2π,
 
     # ------------------------------------------------------------ physics
     c  = 1.0,                   # speed of sound
-    xi_over_dx = 1.5,           # healing length ξ = xi_over_dx · dx
+    xi_over_dx = 2.0,           # healing length ξ = xi_over_dx · dx
     n0 = 1.0,                   # mean density
 
     # ------------------------------------------------------------ case
@@ -33,7 +33,7 @@
                                 # "random":   Random array of quantum vortices
 
     dipole_separation = 10.0,    # [ξ]  distance between the two vortices
-    nvortices = 50,               # number of vortices (case "random")
+    nvortices = 200,               # number of vortices (case "random")
     seed = 1234,                  # random seed (case "random")
 
     noise_amplitude = 0.0,     # relative to √n0 (cases "obstacle" and "noise")
@@ -41,13 +41,29 @@
     kicmax = 4,                 # [kξ]  maximum wavenumber of the noise (in units of ξ⁻¹)
     obstacle = (V0       = 10.0, # [μ]  height
                 sigma    = 2, # [ξ]  width
-                velocity = 0.4, # [c]  speed along x
+                velocity = 0.6, # [c]  speed along x
                 x0       = -0.25, # initial position, as a fraction of Lx from the box centre
                 y0       = 0.0),  # initial position, as a fraction of Ly from the box centre
 
     # ------------------------------------------------------------ time stepping
     dt     = 0.01,              # time step (IFRK4)
-    nsteps = 10000,
+    nsteps = 100000,
+
+    # ------------------------------------------------------------ imaginary-time relaxation (RGLE)
+    # Optionally relax the initial state in imaginary time (real Ginzburg-Landau equation)
+    # before the real-time run. With case = "obstacle" the obstacle is held at its initial
+    # position during the relaxation, so the run starts from the ground state around it.
+    # Not for case = "noise" (it would remove the noise).
+    # A vortex dipole is not a stationary state of the RGLE: the vortices attract and
+    # annihilate. For a separation of 8ξ the pair is unchanged for τ < 2ξ/c, visibly closer
+    # at 3-5 ξ/c and gone at ~15 ξ/c. For the dipole use a short relax_max_time (1-2 ξ/c).
+    relax               = true,
+    relax_dt            = 0.01,           # imaginary-time step
+    relax_max_time      = 1.0,            # stop after this imaginary time ...
+    relax_tol           = 1e-6,           # ... or when the residual ‖∂τψ‖/(ω0‖ψ‖) is below this
+    relax_normalization = "fixed_mu",     # "fixed_mu": μ = g n0 fixed, N free
+                                          # "fixed_number": N kept at its initial value
+    relax_check_every   = 100,            # steps between residual checks (and printed lines)
 
     # ------------------------------------------------------------ HDF5 output
     save_output = true,         # master switch
